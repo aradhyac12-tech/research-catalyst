@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790227790176,
+      "tag": "0000_paperly_core_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790411100694,
+      "tag": "0001_payment_methods_razorpay_kgqr",
+      "breakpoints": true
+    }
+  ]
+}
