@@ -22,20 +22,23 @@ import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedCertificatesRouteImport } from './routes/_authenticated/certificates'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedFounderRouteImport } from './routes/_authenticated/founder'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
-import { Route as AuthenticatedFounderRouteImport } from './routes/_authenticated/founder'
 import { Route as AuthenticatedSubmitRouteImport } from './routes/_authenticated/submit'
 import { Route as ArticlePaperlyIdRouteImport } from './routes/article.$paperlyId'
 import { Route as PaperPublicIdRouteImport } from './routes/paper.$publicId'
 import { Route as PoliciesIndexRouteImport } from './routes/policies.index'
 import { Route as PoliciesSlugRouteImport } from './routes/policies.$slug'
 import { Route as VerifyCertIdRouteImport } from './routes/verify_.$certId'
+import { Route as AuthenticatedManuscriptPaperIdRouteImport } from './routes/_authenticated/manuscript.$paperId'
 import { Route as AuthenticatedMyResearchIndexRouteImport } from './routes/_authenticated/my-research.index'
 import { Route as AuthenticatedMyResearchIdRouteImport } from './routes/_authenticated/my-research.$id'
-import { Route as AuthenticatedManuscriptPaperIdRouteImport } from './routes/_authenticated/manuscript.$paperId'
 import { Route as AuthenticatedOrcidCallbackRouteImport } from './routes/_authenticated/orcid.callback'
+import { Route as ApiPublicClientErrorRouteImport } from './routes/api/public/client-error'
+import { Route as ApiPublicHealthRouteImport } from './routes/api/public/health'
 import { Route as VerifyCertificateCertIdRouteImport } from './routes/verify_.certificate.$certId'
+import { Route as ApiPublicMailProcessRouteImport } from './routes/api/public/mail/process'
 import { Route as ApiPublicPaymentsRazorpayWebhookRouteImport } from './routes/api/public/payments/razorpay-webhook'
 
 const IndexRoute = IndexRouteImport.update({
@@ -103,6 +106,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedFounderRoute = AuthenticatedFounderRouteImport.update({
+  id: '/founder',
+  path: '/founder',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -111,11 +119,6 @@ const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
 const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
   id: '/reviews',
   path: '/reviews',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedFounderRoute = AuthenticatedFounderRouteImport.update({
-  id: '/founder',
-  path: '/founder',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedSubmitRoute = AuthenticatedSubmitRouteImport.update({
@@ -148,6 +151,12 @@ const VerifyCertIdRoute = VerifyCertIdRouteImport.update({
   path: '/verify/$certId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedManuscriptPaperIdRoute =
+  AuthenticatedManuscriptPaperIdRouteImport.update({
+    id: '/manuscript/$paperId',
+    path: '/manuscript/$paperId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMyResearchIndexRoute =
   AuthenticatedMyResearchIndexRouteImport.update({
     id: '/my-research/',
@@ -160,21 +169,30 @@ const AuthenticatedMyResearchIdRoute =
     path: '/my-research/$id',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedManuscriptPaperIdRoute =
-  AuthenticatedManuscriptPaperIdRouteImport.update({
-    id: '/manuscript/$paperId',
-    path: '/manuscript/$paperId',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedOrcidCallbackRoute =
   AuthenticatedOrcidCallbackRouteImport.update({
     id: '/orcid/callback',
     path: '/orcid/callback',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicClientErrorRoute = ApiPublicClientErrorRouteImport.update({
+  id: '/api/public/client-error',
+  path: '/api/public/client-error',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicHealthRoute = ApiPublicHealthRouteImport.update({
+  id: '/api/public/health',
+  path: '/api/public/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VerifyCertificateCertIdRoute = VerifyCertificateCertIdRouteImport.update({
   id: '/verify_/certificate/$certId',
   path: '/verify/certificate/$certId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicMailProcessRoute = ApiPublicMailProcessRouteImport.update({
+  id: '/api/public/mail/process',
+  path: '/api/public/mail/process',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicPaymentsRazorpayWebhookRoute =
@@ -197,20 +215,23 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthenticatedAdminRoute
   '/certificates': typeof AuthenticatedCertificatesRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/founder': typeof AuthenticatedFounderRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/reviews': typeof AuthenticatedReviewsRoute
-  '/founder': typeof AuthenticatedFounderRoute
   '/submit': typeof AuthenticatedSubmitRoute
   '/article/$paperlyId': typeof ArticlePaperlyIdRoute
   '/paper/$publicId': typeof PaperPublicIdRoute
   '/policies/$slug': typeof PoliciesSlugRoute
   '/verify/$certId': typeof VerifyCertIdRoute
   '/policies/': typeof PoliciesIndexRoute
-  '/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/manuscript/$paperId': typeof AuthenticatedManuscriptPaperIdRoute
+  '/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/orcid/callback': typeof AuthenticatedOrcidCallbackRoute
+  '/api/public/client-error': typeof ApiPublicClientErrorRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/verify/certificate/$certId': typeof VerifyCertificateCertIdRoute
   '/my-research/': typeof AuthenticatedMyResearchIndexRoute
+  '/api/public/mail/process': typeof ApiPublicMailProcessRoute
   '/api/public/payments/razorpay-webhook': typeof ApiPublicPaymentsRazorpayWebhookRoute
 }
 export interface FileRoutesByTo {
@@ -226,20 +247,23 @@ export interface FileRoutesByTo {
   '/admin': typeof AuthenticatedAdminRoute
   '/certificates': typeof AuthenticatedCertificatesRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/founder': typeof AuthenticatedFounderRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/reviews': typeof AuthenticatedReviewsRoute
-  '/founder': typeof AuthenticatedFounderRoute
   '/submit': typeof AuthenticatedSubmitRoute
   '/article/$paperlyId': typeof ArticlePaperlyIdRoute
   '/paper/$publicId': typeof PaperPublicIdRoute
   '/policies/$slug': typeof PoliciesSlugRoute
   '/verify/$certId': typeof VerifyCertIdRoute
   '/policies': typeof PoliciesIndexRoute
-  '/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/manuscript/$paperId': typeof AuthenticatedManuscriptPaperIdRoute
+  '/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/orcid/callback': typeof AuthenticatedOrcidCallbackRoute
+  '/api/public/client-error': typeof ApiPublicClientErrorRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/verify/certificate/$certId': typeof VerifyCertificateCertIdRoute
   '/my-research': typeof AuthenticatedMyResearchIndexRoute
+  '/api/public/mail/process': typeof ApiPublicMailProcessRoute
   '/api/public/payments/razorpay-webhook': typeof ApiPublicPaymentsRazorpayWebhookRoute
 }
 export interface FileRoutesById {
@@ -257,20 +281,23 @@ export interface FileRoutesById {
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/certificates': typeof AuthenticatedCertificatesRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/founder': typeof AuthenticatedFounderRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/reviews': typeof AuthenticatedReviewsRoute
-  '/_authenticated/founder': typeof AuthenticatedFounderRoute
   '/_authenticated/submit': typeof AuthenticatedSubmitRoute
   '/article/$paperlyId': typeof ArticlePaperlyIdRoute
   '/paper/$publicId': typeof PaperPublicIdRoute
   '/policies/$slug': typeof PoliciesSlugRoute
   '/verify_/$certId': typeof VerifyCertIdRoute
   '/policies/': typeof PoliciesIndexRoute
-  '/_authenticated/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/_authenticated/manuscript/$paperId': typeof AuthenticatedManuscriptPaperIdRoute
+  '/_authenticated/my-research/$id': typeof AuthenticatedMyResearchIdRoute
   '/_authenticated/orcid/callback': typeof AuthenticatedOrcidCallbackRoute
+  '/api/public/client-error': typeof ApiPublicClientErrorRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/verify_/certificate/$certId': typeof VerifyCertificateCertIdRoute
   '/_authenticated/my-research/': typeof AuthenticatedMyResearchIndexRoute
+  '/api/public/mail/process': typeof ApiPublicMailProcessRoute
   '/api/public/payments/razorpay-webhook': typeof ApiPublicPaymentsRazorpayWebhookRoute
 }
 export interface FileRouteTypes {
@@ -288,20 +315,23 @@ export interface FileRouteTypes {
     | '/admin'
     | '/certificates'
     | '/dashboard'
+    | '/founder'
     | '/profile'
     | '/reviews'
-    | '/founder'
     | '/submit'
     | '/article/$paperlyId'
     | '/paper/$publicId'
     | '/policies/$slug'
     | '/verify/$certId'
     | '/policies/'
-    | '/my-research/$id'
     | '/manuscript/$paperId'
+    | '/my-research/$id'
     | '/orcid/callback'
+    | '/api/public/client-error'
+    | '/api/public/health'
     | '/verify/certificate/$certId'
     | '/my-research/'
+    | '/api/public/mail/process'
     | '/api/public/payments/razorpay-webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -317,20 +347,23 @@ export interface FileRouteTypes {
     | '/admin'
     | '/certificates'
     | '/dashboard'
+    | '/founder'
     | '/profile'
     | '/reviews'
-    | '/founder'
     | '/submit'
     | '/article/$paperlyId'
     | '/paper/$publicId'
     | '/policies/$slug'
     | '/verify/$certId'
     | '/policies'
-    | '/my-research/$id'
     | '/manuscript/$paperId'
+    | '/my-research/$id'
     | '/orcid/callback'
+    | '/api/public/client-error'
+    | '/api/public/health'
     | '/verify/certificate/$certId'
     | '/my-research'
+    | '/api/public/mail/process'
     | '/api/public/payments/razorpay-webhook'
   id:
     | '__root__'
@@ -347,20 +380,23 @@ export interface FileRouteTypes {
     | '/_authenticated/admin'
     | '/_authenticated/certificates'
     | '/_authenticated/dashboard'
+    | '/_authenticated/founder'
     | '/_authenticated/profile'
     | '/_authenticated/reviews'
-    | '/_authenticated/founder'
     | '/_authenticated/submit'
     | '/article/$paperlyId'
     | '/paper/$publicId'
     | '/policies/$slug'
     | '/verify_/$certId'
     | '/policies/'
-    | '/_authenticated/my-research/$id'
     | '/_authenticated/manuscript/$paperId'
+    | '/_authenticated/my-research/$id'
     | '/_authenticated/orcid/callback'
+    | '/api/public/client-error'
+    | '/api/public/health'
     | '/verify_/certificate/$certId'
     | '/_authenticated/my-research/'
+    | '/api/public/mail/process'
     | '/api/public/payments/razorpay-webhook'
   fileRoutesById: FileRoutesById
 }
@@ -380,7 +416,10 @@ export interface RootRouteChildren {
   PoliciesSlugRoute: typeof PoliciesSlugRoute
   VerifyCertIdRoute: typeof VerifyCertIdRoute
   PoliciesIndexRoute: typeof PoliciesIndexRoute
+  ApiPublicClientErrorRoute: typeof ApiPublicClientErrorRoute
+  ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   VerifyCertificateCertIdRoute: typeof VerifyCertificateCertIdRoute
+  ApiPublicMailProcessRoute: typeof ApiPublicMailProcessRoute
   ApiPublicPaymentsRazorpayWebhookRoute: typeof ApiPublicPaymentsRazorpayWebhookRoute
 }
 
@@ -477,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/founder': {
+      id: '/_authenticated/founder'
+      path: '/founder'
+      fullPath: '/founder'
+      preLoaderRoute: typeof AuthenticatedFounderRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/profile': {
       id: '/_authenticated/profile'
       path: '/profile'
@@ -489,13 +535,6 @@ declare module '@tanstack/react-router' {
       path: '/reviews'
       fullPath: '/reviews'
       preLoaderRoute: typeof AuthenticatedReviewsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/founder': {
-      id: '/_authenticated/founder'
-      path: '/founder'
-      fullPath: '/founder'
-      preLoaderRoute: typeof AuthenticatedFounderRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/submit': {
@@ -540,6 +579,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VerifyCertIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/manuscript/$paperId': {
+      id: '/_authenticated/manuscript/$paperId'
+      path: '/manuscript/$paperId'
+      fullPath: '/manuscript/$paperId'
+      preLoaderRoute: typeof AuthenticatedManuscriptPaperIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/my-research/': {
       id: '/_authenticated/my-research/'
       path: '/my-research'
@@ -554,13 +600,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMyResearchIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/manuscript/$paperId': {
-      id: '/_authenticated/manuscript/$paperId'
-      path: '/manuscript/$paperId'
-      fullPath: '/manuscript/$paperId'
-      preLoaderRoute: typeof AuthenticatedManuscriptPaperIdRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/orcid/callback': {
       id: '/_authenticated/orcid/callback'
       path: '/orcid/callback'
@@ -568,11 +607,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOrcidCallbackRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/client-error': {
+      id: '/api/public/client-error'
+      path: '/api/public/client-error'
+      fullPath: '/api/public/client-error'
+      preLoaderRoute: typeof ApiPublicClientErrorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/health': {
+      id: '/api/public/health'
+      path: '/api/public/health'
+      fullPath: '/api/public/health'
+      preLoaderRoute: typeof ApiPublicHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/verify_/certificate/$certId': {
       id: '/verify_/certificate/$certId'
       path: '/verify/certificate/$certId'
       fullPath: '/verify/certificate/$certId'
       preLoaderRoute: typeof VerifyCertificateCertIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/mail/process': {
+      id: '/api/public/mail/process'
+      path: '/api/public/mail/process'
+      fullPath: '/api/public/mail/process'
+      preLoaderRoute: typeof ApiPublicMailProcessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/payments/razorpay-webhook': {
@@ -589,12 +649,12 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
   AuthenticatedCertificatesRoute: typeof AuthenticatedCertificatesRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedFounderRoute: typeof AuthenticatedFounderRoute
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedReviewsRoute: typeof AuthenticatedReviewsRoute
-  AuthenticatedFounderRoute: typeof AuthenticatedFounderRoute
   AuthenticatedSubmitRoute: typeof AuthenticatedSubmitRoute
-  AuthenticatedMyResearchIdRoute: typeof AuthenticatedMyResearchIdRoute
   AuthenticatedManuscriptPaperIdRoute: typeof AuthenticatedManuscriptPaperIdRoute
+  AuthenticatedMyResearchIdRoute: typeof AuthenticatedMyResearchIdRoute
   AuthenticatedOrcidCallbackRoute: typeof AuthenticatedOrcidCallbackRoute
   AuthenticatedMyResearchIndexRoute: typeof AuthenticatedMyResearchIndexRoute
 }
@@ -603,12 +663,12 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
   AuthenticatedCertificatesRoute: AuthenticatedCertificatesRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedFounderRoute: AuthenticatedFounderRoute,
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedReviewsRoute: AuthenticatedReviewsRoute,
-  AuthenticatedFounderRoute: AuthenticatedFounderRoute,
   AuthenticatedSubmitRoute: AuthenticatedSubmitRoute,
-  AuthenticatedMyResearchIdRoute: AuthenticatedMyResearchIdRoute,
   AuthenticatedManuscriptPaperIdRoute: AuthenticatedManuscriptPaperIdRoute,
+  AuthenticatedMyResearchIdRoute: AuthenticatedMyResearchIdRoute,
   AuthenticatedOrcidCallbackRoute: AuthenticatedOrcidCallbackRoute,
   AuthenticatedMyResearchIndexRoute: AuthenticatedMyResearchIndexRoute,
 }
@@ -632,7 +692,10 @@ const rootRouteChildren: RootRouteChildren = {
   PoliciesSlugRoute: PoliciesSlugRoute,
   VerifyCertIdRoute: VerifyCertIdRoute,
   PoliciesIndexRoute: PoliciesIndexRoute,
+  ApiPublicClientErrorRoute: ApiPublicClientErrorRoute,
+  ApiPublicHealthRoute: ApiPublicHealthRoute,
   VerifyCertificateCertIdRoute: VerifyCertificateCertIdRoute,
+  ApiPublicMailProcessRoute: ApiPublicMailProcessRoute,
   ApiPublicPaymentsRazorpayWebhookRoute: ApiPublicPaymentsRazorpayWebhookRoute,
 }
 export const routeTree = rootRouteImport
