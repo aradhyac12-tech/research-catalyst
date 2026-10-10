@@ -1,0 +1,471 @@
+import { db, dbx, audit, notify, transition, getStatus, log } from "./core.server";
+import { applyPromo, normalizePromoCode, promoProblem, type PromoRow } from "@/lib/domain/promo";
+import { canPaymentTransition } from "@/lib/domain/payment-provider";
+import {
+  razorpayConfig, createRazorpayOrder, fetchRazorpayPayment, captureRazorpayPayment,
+  verifyCheckoutSignature, verifyWebhookSignature, refundRazorpayPayment, RazorpayError,
+} from "@/lib/domain/razorpay";
+import { refundSplit } from "@/lib/domain/fees";
+import { isFeeWaived } from "./fee-waiver.server";
+
+export type PayMethod = "RAZORPAY" | "KG_QR" | "TEST";
+export const METHOD_CURRENCY: Record<PayMethod, string> = { RAZORPAY: "INR", KG_QR: "KGS", TEST: "INR" };
+type Target = "PROCESSING" | "PAID" | "FAILED" | "REFUNDED" | "CANCELLED";
+
+function newOrderId() {
+  const rand = crypto.getRandomValues(new Uint8Array(4));
+  return `PPL-${Date.now().toString(36).toUpperCase()}-${Array.from(rand).map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
+export async function getKgQrSettings() {
+  const { data } = await db.from("payment_settings").select("value").eq("key", "KG_QR").maybeSingle();
+  const v = (data?.value ?? {}) as { enabled?: boolean; image_path?: string | null; recipient?: string | null; instructions?: string | null };
+  let imageUrl: string | null = null;
+  if (v.image_path) {
+    const s = await db.storage.from("payment-qr").createSignedUrl(v.image_path, 3600);
+    imageUrl = s.data?.signedUrl ?? null;
+  }
+  return { enabled: !!v.enabled && !!v.image_path, imagePath: v.image_path ?? null, imageUrl, recipient: v.recipient ?? null, instructions: v.instructions ?? null };
+}
+
+export async function availableMethods() {
+  const kg = await getKgQrSettings();
+  return {
+    RAZORPAY: !!razorpayConfig(),
+    KG_QR: false && kg.enabled, // hidden: Razorpay only for now
+    TEST: process.env["PAYMENT_TEST_MODE"] === "on" && process.env["NODE_ENV"] !== "production" && !!process.env["TEST_PAYMENT_WEBHOOK_SECRET"],
+  };
+}
+
+export async function priceFor(currency: string) {
+  const { data: product } = await db.from("products").select("id, name, required_for_publication").eq("code", "PUBLICATION_PROCESSING").single();
+  if (!product) throw new Error("Publication product missing");
+  const { data: price } = await db.from("product_prices").select("amount_minor, currency").eq("product_id", product.id).eq("currency", currency).eq("active", true).maybeSingle();
+  if (!price) throw new Error(`No ${currency} price configured`);
+  return { productId: product.id, productName: product.name, amountMinor: price.amount_minor, currency };
+}
+
+/** Looks a code up and checks every rule. Throws a user-facing message when it cannot be used. */
+export async function resolvePromo(userId: string, rawCode: string, priceMinor: number, currency: string) {
+  const code = normalizePromoCode(rawCode);
+  const { data: promo } = await dbx.from("promo_codes").select("id, code, amount_off_minor, currency, active, max_redemptions, expires_at").eq("code", code).maybeSingle() as { data: PromoRow | null };
+  if (!promo) throw new Error("That promo code is not valid");
+  const [{ count: redeemed }, { count: mine }] = await Promise.all([
+    dbx.from("promo_redemptions").select("id", { count: "exact", head: true }).eq("promo_id", promo.id),
+    dbx.from("promo_redemptions").select("id", { count: "exact", head: true }).eq("promo_id", promo.id).eq("user_id", userId),
+  ]) as Array<{ count: number | null }>;
+  const problem = promoProblem(promo, priceMinor, currency, redeemed ?? 0, mine ?? 0);
+  if (problem) throw new Error(problem);
+  const { discountMinor, finalMinor } = applyPromo(priceMinor, promo.amount_off_minor);
+  return { promo, discountMinor, finalMinor };
+}
+
+/** Preview for the checkout box: shows the new total without creating anything. */
+export async function previewPromo(userId: string, rawCode: string, currency = "INR") {
+  const price = await priceFor(currency);
+  const r = await resolvePromo(userId, rawCode, price.amountMinor, currency);
+  return { code: r.promo.code, originalMinor: price.amountMinor, discountMinor: r.discountMinor, finalMinor: r.finalMinor, currency };
+}
+
+/** True when the paper has a settled (PAID) fee. A paid, not-refunded fee is what lets screening start. */
+export async function hasPaidFee(paperId: string) {
+  const { count } = await db.from("payments").select("id", { count: "exact", head: true }).eq("paper_id", paperId).eq("status", "PAID");
+  return (count ?? 0) > 0;
+}
+
+/** The fee is settled when it was paid, or when a founder has paused the paywall for the paper's owner. */
+export async function feeCleared(paperId: string) {
+  if (await hasPaidFee(paperId)) return true;
+  const { data: paper } = await db.from("papers").select("owner_id").eq("id", paperId).maybeSingle();
+  return !!paper && await isFeeWaived(paper.owner_id);
+}
+
+/** Starts (or resumes) the fee payment. The fee is paid right after upload (SUBMITTED); screening starts only once it is PAID.
+ *  ACCEPTED / PAYMENT_PENDING stays open only for older papers that reached acceptance without paying. */
+export async function startPublicationPayment(userId: string, paperId: string, method: PayMethod, promoCode?: string | null) {
+  const methods = await availableMethods();
+  if (!methods[method]) throw new Error("This payment method is not available yet");
+  const { data: paper } = await db.from("papers").select("id, owner_id, status, public_id, title").eq("id", paperId).single();
+  if (!paper || paper.owner_id !== userId) throw new Error("Paper not found");
+  if (!["SUBMITTED", "ACCEPTED", "PAYMENT_PENDING"].includes(paper.status)) throw new Error("Payment is not needed at this stage");
+  if (await hasPaidFee(paperId)) throw new Error("The fee for this paper has already been paid");
+  if (await isFeeWaived(userId)) throw new Error("No fee is needed for this account");
+
+  const currency = METHOD_CURRENCY[method];
+  const price = await priceFor(currency);
+  const promo = promoCode && promoCode.trim() ? await resolvePromo(userId, promoCode, price.amountMinor, currency) : null;
+  const { data: open } = await db.from("payments").select("*").eq("paper_id", paperId).in("status", ["PENDING", "PROCESSING"]);
+  let payment = (open ?? []).find((p) => p.method === method && p.status === "PENDING" && ((p as unknown as { promo_code_id?: string | null }).promo_code_id ?? null) === (promo?.promo.id ?? null)) ?? null;
+  if ((open ?? []).some((p) => p.status === "PROCESSING")) throw new Error("A payment is already awaiting verification");
+  for (const p of open ?? []) {
+    if (p.id !== payment?.id) {
+      await db.from("payments").update({ status: "CANCELLED" }).eq("id", p.id).eq("status", "PENDING");
+      await audit({ actor_id: userId, action: "payment_cancelled", resource_type: "payment", resource_id: p.id, metadata: { reason: "switched method" } });
+    }
+  }
+  if (!payment) {
+    const orderId = newOrderId();
+    const ins = await dbx.from("payments").insert({
+      order_id: orderId, user_id: userId, paper_id: paperId, product_id: price.productId, amount_minor: promo?.finalMinor ?? price.amountMinor, currency,
+      original_amount_minor: price.amountMinor, discount_minor: promo?.discountMinor ?? 0, promo_code_id: promo?.promo.id ?? null,
+      provider: method === "RAZORPAY" ? "razorpay" : method === "KG_QR" ? "kg_qr_manual" : "test", method,
+      idempotency_key: `${paperId}:${method}:${orderId}`,
+    }).select("*").single();
+    if (ins.error || !ins.data) throw new Error(ins.error?.message ?? "Could not create payment");
+    payment = ins.data;
+    await audit({ actor_id: userId, action: "payment_created", resource_type: "payment", resource_id: payment.id, new_value: { method, amount_minor: payment.amount_minor, original_amount_minor: price.amountMinor, promo: promo?.promo.code ?? null, currency } });
+  }
+  if (paper.status === "ACCEPTED") await transition(paperId, "PAYMENT_PENDING", userId, "USER", `payment ${payment.order_id} started`);
+
+  const base = { orderId: payment.order_id, amountMinor: payment.amount_minor, discountMinor: promo?.discountMinor ?? 0, currency, method, paperTitle: paper.title, publicId: paper.public_id };
+  if (method === "RAZORPAY") {
+    const cfg = razorpayConfig()!;
+    let rzOrder = payment.provider_order_id;
+    if (!rzOrder) {
+      const o = await createRazorpayOrder(cfg, { amountMinor: payment.amount_minor, currency, receipt: payment.order_id, notes: { order_id: payment.order_id, paper: paper.public_id, ...(promo ? { promo: promo.promo.code } : {}) } });
+      rzOrder = o.id;
+      await db.from("payments").update({ provider_order_id: rzOrder }).eq("id", payment.id);
+    }
+    return { ...base, razorpay: { keyId: cfg.keyId, orderId: rzOrder } };
+  }
+  if (method === "KG_QR") {
+    const kg = await getKgQrSettings();
+    return { ...base, kgQr: { imageUrl: kg.imageUrl, recipient: kg.recipient, instructions: kg.instructions } };
+  }
+  return { ...base, testUrl: `/pay/test/${payment.order_id}` };
+}
+
+/** When a paper is rejected: keep the fixed processing amount and refund the rest of what was paid.
+ *  Idempotent (a payment already refunded is skipped) and never throws: the editorial decision must not depend on the refund. */
+export async function refundOnRejection(paperId: string, actorId: string | null, origin: string) {
+  try {
+    const { data: paid } = await db.from("payments").select("*").eq("paper_id", paperId).eq("status", "PAID").order("completed_at", { ascending: false }).limit(1).maybeSingle();
+    if (!paid) return { refunded: false as const, reason: "no paid fee" };
+    const { retainedMinor, refundMinor } = refundSplit(paid.amount_minor);
+    if (refundMinor <= 0) {
+      await db.from("payments").update({ retained_amount_minor: retainedMinor }).eq("id", paid.id);
+      await audit({ actor_id: actorId, action: "refund_not_due", resource_type: "payment", resource_id: paid.id, metadata: { paid_minor: paid.amount_minor, retained_minor: retainedMinor } });
+      return { refunded: false as const, reason: "nothing to refund" };
+    }
+    let providerRefundId: string | null = null;
+    // Claim first: two concurrent attempts (a double click on "retry", a rejection racing a retry) must not both reach the provider.
+    // The claim expires after 15 minutes so a crashed attempt cannot block the refund forever; the provider-side check below then prevents a double refund.
+    const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
+    const claim = await dbx.from("payments").update({ refund_claimed_at: new Date().toISOString() }).eq("id", paid.id).eq("status", "PAID").or(`refund_claimed_at.is.null,refund_claimed_at.lt.${staleBefore}`).select("id");
+    if (claim.error) {
+      // Migration 0027 not applied yet: keep refunds working with the old behaviour (the provider-side check below still applies) and say so in the log.
+      if (/refund_claimed_at/.test(claim.error.message ?? "")) log("refund_claim_column_missing", { payment: paid.id });
+      else throw new Error("Could not start the refund. Please try again.");
+    } else if (!claim.data?.length) {
+      return { refunded: false as const, reason: "a refund for this payment is already in progress" };
+    }
+    if (paid.method === "RAZORPAY") {
+      const cfg = razorpayConfig();
+      if (!cfg) throw new Error("Razorpay is not configured");
+      if (!paid.provider_transaction_id) throw new Error("Payment has no Razorpay payment id");
+      // Razorpay does not deduplicate refunds. If an earlier attempt reached Razorpay but we never recorded it, the payment already shows the amount refunded.
+      const rp = await fetchRazorpayPayment(cfg, paid.provider_transaction_id);
+      const alreadyMinor = Math.max(0, rp.amount_refunded ?? 0);
+      if (alreadyMinor >= refundMinor) {
+        log("refund_already_at_provider", { payment: paid.id, already_minor: alreadyMinor, due_minor: refundMinor });
+      } else {
+        const r = await refundRazorpayPayment(cfg, paid.provider_transaction_id, refundMinor - alreadyMinor, paid.order_id, { order_id: paid.order_id, reason: "paper rejected" });
+        providerRefundId = r.id;
+      }
+    } else if (paid.method !== "TEST") {
+      throw new Error(`Refund is not automated for ${paid.method}`);
+    }
+    await db.from("payments").update({ refunded_amount_minor: refundMinor, retained_amount_minor: retainedMinor, provider_refund_id: providerRefundId, refund_error: null }).eq("id", paid.id);
+    await finalizePayment(paid.id, "REFUNDED", { actorId, actorType: actorId ? "USER" : "SYSTEM", origin, note: `paper rejected: ${refundMinor / 100} refunded, ${retainedMinor / 100} kept` });
+    return { refunded: true as const, refundMinor, retainedMinor };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log("refund_failed", { paper_id: paperId, error: msg.slice(0, 300) });
+    await db.from("payments").update({ refund_error: msg.slice(0, 500) }).eq("paper_id", paperId).eq("status", "PAID");
+    // Release the claim so an admin retry is possible at once; the provider-side check prevents a double refund if the provider call had in fact succeeded.
+    await dbx.from("payments").update({ refund_claimed_at: null }).eq("paper_id", paperId).eq("status", "PAID").then(() => undefined, () => undefined);
+    await audit({ actor_id: actorId, action: "refund_failed", resource_type: "paper", resource_id: paperId, metadata: { error: msg.slice(0, 300) } });
+    return { refunded: false as const, reason: msg };
+  }
+}
+
+/** Single place that applies a payment outcome and advances the paper. Idempotent via optimistic status checks. */
+export async function finalizePayment(paymentId: string, target: Target, opts: { transactionId?: string | null; actorId?: string | null; actorType: "USER" | "SYSTEM" | "PROVIDER"; origin: string; note?: string }) {
+  const { data: payment } = await db.from("payments").select("*").eq("id", paymentId).single();
+  if (!payment) throw new Error("Payment not found");
+  if (payment.status === target) return { changed: false };
+  if (!canPaymentTransition(payment.status, target)) return { changed: false };
+  const now = new Date().toISOString();
+  const upd = await db.from("payments").update({
+    status: target,
+    provider_transaction_id: opts.transactionId ?? payment.provider_transaction_id,
+    completed_at: target === "PAID" ? now : payment.completed_at,
+    refunded_at: target === "REFUNDED" ? now : payment.refunded_at,
+    ...(opts.actorType === "USER" && (target === "PAID" || target === "FAILED") ? { reviewed_by: opts.actorId ?? null, reviewed_at: now, review_note: opts.note ?? null } : {}),
+  }).eq("id", payment.id).eq("status", payment.status).select("id");
+  if (!upd.data?.length) return { changed: false }; // lost race
+  await audit({ actor_id: opts.actorId ?? null, actor_type: opts.actorType, action: target === "PAID" ? "payment_completed" : `payment_${target.toLowerCase()}`, resource_type: "payment", resource_id: payment.id, old_value: { status: payment.status }, new_value: { status: target }, metadata: { method: payment.method, note: opts.note ?? null } });
+  if (target !== "PROCESSING") {
+    const { data: pp } = payment.paper_id ? await db.from("papers").select("public_id, title").eq("id", payment.paper_id).maybeSingle() : { data: null };
+    const amount = `${(payment.amount_minor / 100).toFixed(2)} ${payment.currency}`;
+    const what = pp ? ` for “${pp.title}” (${pp.public_id})` : "";
+    const title = target === "PAID" ? "Payment successful" : target === "REFUNDED" ? "Payment refunded" : `Payment ${target.toLowerCase()}`;
+    const lead = target === "PAID" ? `Your payment of ${amount}${what} was successful.` : target === "REFUNDED" ? `A refund${what} was issued.` : `Your payment of ${amount}${what} was ${target.toLowerCase()}.`;
+    await notify(payment.user_id, `payment_${target.toLowerCase()}`, title, `${lead}\nOrder ${payment.order_id}${opts.note && !/^admin test payment$/i.test(opts.note) ? ` — ${opts.note}` : ""}`, payment.paper_id ? `/my-research/${payment.paper_id}` : undefined);
+  }
+  const promoId = (payment as unknown as { promo_code_id?: string | null }).promo_code_id;
+  if (target === "PAID" && promoId) {
+    const r = await dbx.from("promo_redemptions").insert({ promo_id: promoId, payment_id: payment.id, user_id: payment.user_id, paper_id: payment.paper_id, amount_off_minor: (payment as unknown as { discount_minor?: number }).discount_minor ?? 0 });
+    if (r.error && r.error.code !== "23505") log("promo_redemption_failed", { payment: payment.id, error: r.error.message });
+  }
+  if (payment.paper_id) {
+    const st = await getStatus(payment.paper_id);
+    if (target === "PAID" && st === "PAYMENT_PENDING") {
+      await transition(payment.paper_id, "PAYMENT_COMPLETED", opts.actorId ?? null, opts.actorType, `payment ${payment.order_id}`);
+      // Payment never publishes. The paper waits in PUBLICATION_PENDING for staff to complete production and publish.
+      await transition(payment.paper_id, "PUBLICATION_PENDING", null, "SYSTEM", "payment completed; awaiting production");
+    } else if ((target === "FAILED" || target === "CANCELLED") && st === "PAYMENT_PENDING") {
+      await transition(payment.paper_id, "ACCEPTED", null, "SYSTEM", `payment ${target.toLowerCase()}`);
+    }
+  }
+  return { changed: true };
+}
+
+// ---------- Razorpay ----------
+/** A settlement problem that retrying cannot fix (unknown order, amount mismatch, Razorpay refused the lookup). The webhook acknowledges these instead of asking Razorpay to redeliver forever. */
+export class PermanentPaymentError extends Error {
+  constructor(message: string) { super(message); this.name = "PermanentPaymentError"; }
+}
+
+async function settleRazorpayPayment(rzPaymentId: string, origin: string) {
+  const cfg = razorpayConfig();
+  if (!cfg) throw new Error("Razorpay is not configured");
+  let p;
+  try { p = await fetchRazorpayPayment(cfg, rzPaymentId); }
+  catch (e) { if (e instanceof RazorpayError && !e.transient) throw new PermanentPaymentError(e.message); throw e; }
+  const { data: payment } = await db.from("payments").select("*").eq("provider", "razorpay").eq("provider_order_id", p.order_id).maybeSingle();
+  if (!payment) throw new PermanentPaymentError("Unknown order");
+  if (p.amount !== payment.amount_minor || p.currency !== payment.currency) {
+    await audit({ actor_type: "PROVIDER", action: "payment_mismatch", resource_type: "payment", resource_id: payment.id, metadata: { expected: payment.amount_minor, got: p.amount, currency: p.currency } });
+    throw new PermanentPaymentError("Amount mismatch");
+  }
+  if (p.status === "authorized") p = await captureRazorpayPayment(cfg, p.id, payment.amount_minor, payment.currency);
+  if (p.status === "captured") await finalizePayment(payment.id, "PAID", { transactionId: p.id, actorType: "PROVIDER", origin });
+  else if (p.status === "failed") await finalizePayment(payment.id, "FAILED", { transactionId: p.id, actorType: "PROVIDER", origin });
+  return { status: p.status, paymentId: payment.id };
+}
+
+/** Called after Checkout success. Signature is verified, then the payment is re-fetched from Razorpay (never trust the browser). */
+export async function confirmRazorpayCheckout(userId: string, args: { orderId: string; paymentId: string; signature: string }, origin: string) {
+  const cfg = razorpayConfig();
+  if (!cfg) throw new Error("Razorpay is not configured");
+  const { data: payment } = await db.from("payments").select("user_id").eq("provider", "razorpay").eq("provider_order_id", args.orderId).maybeSingle();
+  if (!payment || payment.user_id !== userId) throw new Error("Payment not found");
+  if (!(await verifyCheckoutSignature(cfg.keySecret, args.orderId, args.paymentId, args.signature))) {
+    log("razorpay_checkout_bad_signature", { order: args.orderId });
+    throw new Error("Payment signature could not be verified");
+  }
+  return settleRazorpayPayment(args.paymentId, origin);
+}
+
+export async function handleRazorpayWebhook(rawBody: string, headers: Headers, origin: string) {
+  const cfg = razorpayConfig();
+  if (!cfg?.webhookSecret) return { status: 503, body: "not configured" };
+  const sig = headers.get("x-razorpay-signature") ?? "";
+  if (!sig || !(await verifyWebhookSignature(cfg.webhookSecret, rawBody, sig))) {
+    log("payment_webhook_rejected", { provider: "razorpay" });
+    return { status: 401, body: "invalid signature" };
+  }
+  let evt: { event: string; payload?: { payment?: { entity?: { id: string; order_id: string } } } };
+  try { evt = JSON.parse(rawBody); } catch { return { status: 400, body: "invalid payload" }; } // signed but not JSON: retrying cannot help
+  const eventId = headers.get("x-razorpay-event-id") ?? `${evt.event}:${evt.payload?.payment?.entity?.id ?? "?"}`;
+  const entity = evt.payload?.payment?.entity;
+  const { data: payment } = entity ? await db.from("payments").select("id").eq("provider", "razorpay").eq("provider_order_id", entity.order_id).maybeSingle() : { data: null };
+  let eventRowId: string;
+  const ins = await db.from("payment_events").insert({
+    payment_id: payment?.id ?? null, provider: "razorpay", provider_event_id: eventId, event_type: evt.event, signature_valid: true, payload: evt as never,
+  }).select("id").single();
+  if (ins.error) {
+    if (ins.error.code !== "23505") throw new Error(ins.error.message);
+    // A redelivery. If the earlier attempt finished, acknowledge it. If it failed part-way (processed = false), handle it now:
+    // acknowledging an unprocessed event would leave a captured payment unrecorded while the customer has paid.
+    const { data: prev } = await db.from("payment_events").select("id, processed").eq("provider", "razorpay").eq("provider_event_id", eventId).maybeSingle();
+    if (!prev || prev.processed) return { status: 200, body: "duplicate ignored" };
+    eventRowId = prev.id;
+  } else {
+    eventRowId = ins.data.id;
+  }
+  if (entity && payment && ["payment.captured", "payment.authorized", "payment.failed", "order.paid"].includes(evt.event)) {
+    try { await settleRazorpayPayment(entity.id, origin); }
+    catch (e) {
+      if (e instanceof PermanentPaymentError) {
+        // Already audited where relevant. Mark handled so Razorpay stops redelivering something that can never succeed.
+        log("razorpay_webhook_permanent_failure", { event: evt.event, error: e.message });
+        await db.from("payment_events").update({ processed: true }).eq("id", eventRowId);
+        return { status: 200, body: "ignored" };
+      }
+      // Transient (Razorpay or database unavailable): leave the event unprocessed and answer 5xx so Razorpay redelivers it.
+      log("razorpay_webhook_settle_failed", { event: evt.event, error: e instanceof Error ? e.message : String(e) });
+      return { status: 500, body: "retry" };
+    }
+  }
+  await db.from("payment_events").update({ processed: true }).eq("id", eventRowId);
+  return { status: 200, body: "ok" };
+}
+
+// ---------- Kyrgyz QR (manual verification) ----------
+export async function submitKgQrReference(userId: string, orderId: string, reference: string, origin: string) {
+  const ref = reference.trim();
+  if (ref.length < 4 || ref.length > 64) throw new Error("Enter the transaction number shown in your banking app");
+  const { data: payment } = await db.from("payments").select("*").eq("order_id", orderId).single();
+  if (!payment || payment.user_id !== userId || payment.method !== "KG_QR") throw new Error("Payment not found");
+  if (payment.status !== "PENDING") throw new Error("This payment has already been submitted");
+  const upd = await db.from("payments").update({ payer_reference: ref }).eq("id", payment.id).eq("status", "PENDING");
+  if (upd.error) throw new Error(upd.error.code === "23505" ? "This transaction number was already used" : upd.error.message);
+  await finalizePayment(payment.id, "PROCESSING", { actorId: userId, actorType: "USER", origin });
+  const { data: admins } = await db.from("user_roles").select("user_id").in("role", ["payment_admin", "admin", "super_admin"]);
+  for (const a of new Set((admins ?? []).map((r) => r.user_id))) {
+    await notify(a, "payment_review", "Kyrgyz QR payment to verify", `Order ${payment.order_id}, reference ${ref}`, "/admin");
+  }
+}
+
+export async function reviewKgQrPayment(actorId: string, paymentId: string, approve: boolean, note: string, origin: string) {
+  const { data: payment } = await db.from("payments").select("method, status").eq("id", paymentId).single();
+  if (!payment || payment.method !== "KG_QR" || payment.status !== "PROCESSING") throw new Error("Payment is not awaiting verification");
+  if (!approve && note.trim().length < 5) throw new Error("Give a short reason for rejecting");
+  await finalizePayment(paymentId, approve ? "PAID" : "FAILED", { actorId, actorType: "USER", origin, ...(note.trim() ? { note: note.trim() } : {}) });
+}
+
+// ---------- Simulated test provider (for trying the flow without real money) ----------
+import { TestPaymentProvider } from "@/lib/domain/payment-provider";
+export async function handleTestWebhook(rawBody: string, headers: Headers, origin: string) {
+  const provider = new TestPaymentProvider(process.env["TEST_PAYMENT_WEBHOOK_SECRET"] ?? "");
+  let evt;
+  try { evt = await provider.verifyWebhook(rawBody, headers); } catch { return { status: 401, body: "invalid signature" }; }
+  const { data: payment } = await db.from("payments").select("*").eq("order_id", evt.orderId).maybeSingle();
+  const ins = await db.from("payment_events").insert({ payment_id: payment?.id ?? null, provider: "test", provider_event_id: evt.eventId, event_type: evt.type, signature_valid: true, payload: JSON.parse(rawBody) }).select("id").single();
+  if (ins.error) return ins.error.code === "23505" ? { status: 200, body: "duplicate ignored" } : { status: 500, body: "error" };
+  if (!payment) return { status: 404, body: "unknown order" };
+  if (payment.amount_minor !== evt.amountMinor || payment.currency !== evt.currency) return { status: 400, body: "amount mismatch" };
+  const target = ({ "payment.succeeded": "PAID", "payment.failed": "FAILED", "payment.refunded": "REFUNDED", "payment.cancelled": "CANCELLED" } as const)[evt.type];
+  await finalizePayment(payment.id, target, { transactionId: evt.transactionId, actorType: "PROVIDER", origin });
+  await db.from("payment_events").update({ processed: true }).eq("id", ins.data.id);
+  return { status: 200, body: "ok" };
+}
+
+/** Test page action: signs a simulated provider event server-side and processes it. */
+export async function simulateTestPayment(userId: string, orderId: string, outcome: "payment.succeeded" | "payment.failed", origin: string) {
+  const { data: payment } = await db.from("payments").select("*").eq("order_id", orderId).single();
+  if (!payment || payment.user_id !== userId || payment.method !== "TEST") throw new Error("Payment not found");
+  const { signTestPayload } = await import("@/lib/domain/payment-provider");
+  const body = JSON.stringify({ id: `evt_${crypto.randomUUID()}`, type: outcome, data: { order_id: orderId, transaction_id: `test_txn_${crypto.randomUUID().slice(0, 8)}`, amount_minor: payment.amount_minor, currency: payment.currency } });
+  const t = Math.floor(Date.now() / 1000);
+  const h = new Headers({ "x-test-signature": await signTestPayload(process.env["TEST_PAYMENT_WEBHOOK_SECRET"] ?? "", body, t) });
+  return handleTestWebhook(body, h, origin);
+}
+
+// ---------- Promo codes (admin) ----------
+export async function adminListPromos() {
+  const { data } = await dbx.from("promo_codes").select("id, code, amount_off_minor, currency, active, max_redemptions, expires_at, created_at").order("created_at", { ascending: false }) as { data: Array<PromoRow & { created_at: string }> | null };
+  const { data: reds } = await dbx.from("promo_redemptions").select("promo_id") as { data: Array<{ promo_id: string }> | null };
+  const used: Record<string, number> = {};
+  for (const r of reds ?? []) used[r.promo_id] = (used[r.promo_id] ?? 0) + 1;
+  return (data ?? []).map((p) => ({ ...p, redeemed: used[p.id] ?? 0 }));
+}
+
+export async function adminCreatePromo(actorId: string, args: { code: string; amountOffMinor: number; maxRedemptions?: number | null; expiresAt?: string | null }) {
+  const code = normalizePromoCode(args.code);
+  const { PROMO_CODE_RE } = await import("@/lib/domain/promo");
+  if (!PROMO_CODE_RE.test(code)) throw new Error("Code must be 3-32 letters, numbers, dashes or underscores");
+  const price = await priceFor("INR");
+  const problem = promoProblem({ id: "", code, amount_off_minor: args.amountOffMinor, currency: "INR", active: true, max_redemptions: null, expires_at: null }, price.amountMinor, "INR", 0, 0);
+  if (problem) throw new Error("Amount off must leave at least ₹1 payable");
+  const ins = await dbx.from("promo_codes").insert({ code, amount_off_minor: args.amountOffMinor, currency: "INR", max_redemptions: args.maxRedemptions ?? null, expires_at: args.expiresAt ?? null, created_by: actorId }).select("id").single();
+  if (ins.error) throw new Error(ins.error.code === "23505" ? "That code already exists" : ins.error.message);
+  await audit({ actor_id: actorId, action: "promo_created", resource_type: "promo_code", resource_id: ins.data.id, new_value: { code, amount_off_minor: args.amountOffMinor, max_redemptions: args.maxRedemptions ?? null, expires_at: args.expiresAt ?? null } });
+  return { id: ins.data.id as string };
+}
+
+export async function adminSetPromoActive(actorId: string, id: string, active: boolean) {
+  const upd = await dbx.from("promo_codes").update({ active }).eq("id", id).select("id");
+  if (upd.error || !upd.data?.length) throw new Error("Promo code not found");
+  await audit({ actor_id: actorId, action: active ? "promo_enabled" : "promo_disabled", resource_type: "promo_code", resource_id: id });
+}
+
+// ---------- Admin test mode (try payment + certificate without real money) ----------
+export function adminTestToolsEnabled() {
+  return process.env["ADMIN_TEST_TOOLS"] !== "off";
+}
+
+/** Lists papers an admin can run the test flow on. */
+export async function adminTestCandidates() {
+  const { data } = await db.from("papers").select("id, public_id, title, status, owner_id").order("created_at", { ascending: false }).limit(50);
+  return (data ?? []).map((p) => ({ id: p.id, publicId: p.public_id, title: p.title, status: p.status }));
+}
+
+/** Admin test tools work on a paper in ANY status. The paper only advances (Accepted -> payment -> Publishing) when it was actually Accepted; for any other status the test payment is recorded and the paper's status is left unchanged. */
+/** Paywall data for the admin test checkout: the paper, its fee, and (optionally) a promo preview for the paper's owner. */
+export async function adminTestPaywall(paperId: string, rawCode?: string | null) {
+  const { data: paper } = await db.from("papers").select("id, owner_id, status, public_id, title").eq("id", paperId).single();
+  if (!paper) throw new Error("Paper not found");
+  const price = await priceFor("INR");
+  const promo = rawCode && rawCode.trim() ? await resolvePromo(paper.owner_id, rawCode, price.amountMinor, "INR") : null;
+  return { publicId: paper.public_id, title: paper.title, currency: "INR", amountMinor: price.amountMinor, promo: promo ? { code: promo.promo.code, discountMinor: promo.discountMinor, finalMinor: promo.finalMinor } : null };
+}
+
+export async function adminRunTestPayment(actorId: string, paperId: string, origin: string, promoCode?: string | null) {
+  if (!adminTestToolsEnabled()) throw new Error("Test tools are switched off");
+  const { data: paper } = await db.from("papers").select("id, owner_id, status, public_id, title").eq("id", paperId).single();
+  if (!paper) throw new Error("Paper not found");
+  const price = await priceFor("INR");
+  // A test never uses up a real promo redemption: the discount is applied to the amount but the code is not linked to the payment.
+  const promo = promoCode && promoCode.trim() ? await resolvePromo(paper.owner_id, promoCode, price.amountMinor, "INR") : null;
+  const orderId = `TEST-${newOrderId()}`;
+  const ins = await dbx.from("payments").insert({
+    order_id: orderId, user_id: paper.owner_id, paper_id: paperId, product_id: price.productId, amount_minor: promo?.finalMinor ?? price.amountMinor, currency: "INR",
+    original_amount_minor: price.amountMinor, discount_minor: promo?.discountMinor ?? 0, provider: "test", method: "TEST", idempotency_key: `${paperId}:TEST:${orderId}`,
+  }).select("*").single();
+  if (ins.error || !ins.data) throw new Error(ins.error?.message ?? "Could not create test payment");
+  const payment = ins.data;
+  await audit({ actor_id: actorId, action: "admin_test_payment", resource_type: "payment", resource_id: payment.id, metadata: { paper: paper.public_id, test: true, promo: promo?.promo.code ?? null } });
+  if (paper.status === "ACCEPTED") await transition(paperId, "PAYMENT_PENDING", actorId, "USER", `test payment ${orderId} started`);
+  await finalizePayment(payment.id, "PAID", { transactionId: `test_txn_${crypto.randomUUID().slice(0, 8)}`, actorId, actorType: "USER", origin, note: "Admin test payment" });
+  return { orderId, paperId, redirect: `/my-research/${paperId}` };
+}
+
+/** One click: issues (or reuses) a SUBMISSION certificate for the paper and returns a signed download link. Does not publish anything. */
+export async function adminRunTestCertificate(actorId: string, paperId: string, origin: string) {
+  if (!adminTestToolsEnabled()) throw new Error("Test tools are switched off");
+  const { data: paper } = await db.from("papers").select("id, owner_id, current_version_id").eq("id", paperId).single();
+  if (!paper) throw new Error("Paper not found");
+  if (!paper.current_version_id) throw new Error("This paper has no uploaded version yet");
+  const { data: v } = await db.from("paper_versions").select("author_name_at_submission").eq("id", paper.current_version_id).single();
+  const name = v?.author_name_at_submission?.trim();
+  if (!name) throw new Error("The recorded author name is missing");
+  const { issueCertificate } = await import("./pipeline.server");
+  const certificateId = await issueCertificate({ paperId, versionId: paper.current_version_id, recipientId: paper.owner_id, recipientName: name, type: "SUBMISSION", role: "Author / uploader", origin, actorId });
+  await audit({ actor_id: actorId, action: "admin_test_certificate", resource_type: "certificate", resource_id: certificateId, metadata: { paper: paperId, test: true } });
+  const { data: c } = await db.from("certificates").select("id, storage_path").eq("certificate_id", certificateId).single();
+  if (!c?.storage_path) throw new Error("Certificate file is not ready yet");
+  const signed = await db.storage.from("certificates").createSignedUrl(c.storage_path, 300, { download: `${certificateId}.pdf` });
+  if (signed.error || !signed.data?.signedUrl) throw new Error("Certificate download could not be prepared");
+  return { certificateId, url: signed.data.signedUrl };
+}
+
+// ---------- Failed refunds (admin) ----------
+/** Rejected papers whose automatic refund did not complete (the payment is still PAID with an error recorded). */
+export async function adminListFailedRefunds() {
+  const { data } = await db.from("payments").select("paper_id, order_id, amount_minor, currency, refund_error").eq("status", "PAID").not("refund_error", "is", null).order("created_at", { ascending: false });
+  const ids = Array.from(new Set((data ?? []).map((p) => p.paper_id).filter((x): x is string => !!x)));
+  const { data: papers } = ids.length ? await db.from("papers").select("id, public_id, title, status").in("id", ids) : { data: [] as Array<{ id: string; public_id: string; title: string; status: string }> };
+  const pm = new Map((papers ?? []).map((p) => [p.id, p]));
+  return (data ?? []).filter((p) => p.paper_id && pm.get(p.paper_id)?.status === "REJECTED").map((p) => ({ ...p, paper_id: p.paper_id as string, public_id: pm.get(p.paper_id as string)?.public_id ?? "", title: pm.get(p.paper_id as string)?.title ?? "" }));
+}
+
+/** Retries the refund for a rejected paper. Same rules as the automatic one: 300 kept, the rest returned. */
+export async function adminRetryRefund(actorId: string, paperId: string, origin: string) {
+  if ((await getStatus(paperId)) !== "REJECTED") throw new Error("Only a rejected paper can be refunded");
+  const r = await refundOnRejection(paperId, actorId, origin);
+  if (!r.refunded) throw new Error(`Refund did not complete: ${r.reason}`);
+  return r;
+}
