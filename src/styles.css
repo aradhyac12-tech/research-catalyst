@@ -1,0 +1,353 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@font-face { font-family: "Lora"; font-style: normal; font-weight: 400; font-display: swap; src: url("./assets/fonts/Lora-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Lora"; font-style: normal; font-weight: 700; font-display: swap; src: url("./assets/fonts/Lora-Bold.ttf") format("truetype"); }
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --shadow-soft: 0 0 0 1px rgb(16 32 64 / 0.035), 0 1px 2px rgb(16 32 64 / 0.04), 0 8px 20px -10px rgb(16 32 64 / 0.12);
+  --shadow-lift: 0 1px 2px rgb(16 32 64 / 0.06), 0 10px 24px -8px rgb(16 32 64 / 0.16), 0 28px 56px -28px rgb(16 32 64 / 0.22);
+  --shadow-button: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 1px 2px rgb(15 59 120 / 0.32);
+  --shadow-button-hover: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 1px 2px rgb(15 59 120 / 0.3), 0 8px 18px -8px rgb(15 59 120 / 0.55);
+  --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+  --color-gold: var(--gold);
+  --font-sans: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  --font-serif: "Literata", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --color-positive: var(--positive);
+  --color-caution: var(--caution);
+  --color-positive-soft: var(--positive-soft);
+  --color-caution-soft: var(--caution-soft);
+  --color-critical-soft: var(--critical-soft);
+  --color-wash: var(--wash);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #ffffff;
+  --foreground: #162033;
+  --card: #ffffff;
+  --card-foreground: #162033;
+  --popover: #ffffff;
+  --popover-foreground: #162033;
+  --primary: #0f3b78;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f5f8;
+  --secondary-foreground: #162033;
+  --muted: #f3f5f8;
+  --muted-foreground: #4a5568;
+  --accent: #eaf0f8;
+  --accent-foreground: #0f3b78;
+  --gold: #a8812c;
+  --destructive: #b3261e;
+  --destructive-foreground: #ffffff;
+  --border: #dfe3ea;
+  --input: #7b8494;
+  --ring: #0f3b78;
+  --wash: #f5f7fa;
+  --positive: #1b6e4f;
+  --positive-soft: #e6f2ec;
+  --caution: #8a5a00;
+  --caution-soft: #fbf0d6;
+  --critical-soft: #fbe9e7;
+  --chart-1: #0f3b78; --chart-2: #1b6e4f; --chart-3: #8a5a00; --chart-4: #6b3fa0; --chart-5: #b3261e;
+  --sidebar: #f5f7fa; --sidebar-foreground: #162033; --sidebar-primary: #0f3b78; --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eaf0f8; --sidebar-accent-foreground: #0f3b78; --sidebar-border: #dfe3ea; --sidebar-ring: #0f3b78;
+}
+
+.dark {
+  --background: oklch(0.16 0.03 262);
+  --foreground: oklch(0.96 0.005 255);
+  --card: oklch(0.2 0.035 262);
+  --card-foreground: oklch(0.96 0.005 255);
+  --popover: oklch(0.2 0.035 262);
+  --popover-foreground: oklch(0.96 0.005 255);
+  --primary: oklch(0.78 0.09 264);
+  --primary-foreground: oklch(0.18 0.04 262);
+  --secondary: oklch(0.26 0.035 262);
+  --secondary-foreground: oklch(0.96 0.005 255);
+  --muted: oklch(0.26 0.035 262);
+  --muted-foreground: oklch(0.72 0.02 258);
+  --accent: oklch(0.28 0.05 263);
+  --accent-foreground: oklch(0.96 0.005 255);
+  --wash: oklch(0.22 0.03 262);
+  --gold: oklch(0.78 0.1 85);
+  --destructive: oklch(0.7 0.17 22);
+  --destructive-foreground: oklch(0.16 0.03 262);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.62 0.12 264);
+  --positive: oklch(0.75 0.1 170);
+  --positive-soft: oklch(0.27 0.04 170);
+  --caution: oklch(0.8 0.1 80);
+  --caution-soft: oklch(0.28 0.04 80);
+  --critical-soft: oklch(0.28 0.05 25);
+  --chart-1: oklch(0.7 0.13 264);
+  --chart-2: oklch(0.75 0.1 170);
+  --chart-3: oklch(0.8 0.1 80);
+  --chart-4: oklch(0.7 0.1 310);
+  --chart-5: oklch(0.7 0.15 25);
+  --sidebar: oklch(0.2 0.035 262);
+  --sidebar-foreground: oklch(0.96 0.005 255);
+  --sidebar-primary: oklch(0.78 0.09 264);
+  --sidebar-primary-foreground: oklch(0.18 0.04 262);
+  --sidebar-accent: oklch(0.28 0.05 263);
+  --sidebar-accent-foreground: oklch(0.96 0.005 255);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.62 0.12 264);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  /* A reserved scrollbar gutter stops the page shifting sideways when one page is long and the next is short. */
+  html { overflow-x: clip; max-width: 100%; -webkit-text-size-adjust: 100%; scroll-padding-top: 5rem; scrollbar-gutter: stable; -webkit-tap-highlight-color: transparent; }
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--color-foreground) 26%, transparent) transparent; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern", "liga";
+    font-optical-sizing: auto;
+    overflow-x: clip; /* clip, not hidden: no scroll container, so the sticky header keeps working */
+    max-width: 100%;
+    overflow-wrap: break-word; /* a long unbroken word (a file-style title, a URL, a hash) wraps instead of widening the page */
+  }
+  h1, h2, h3, h4, h5, h6, p, li, a, dd, dt, label, summary { overflow-wrap: anywhere; }
+  /* Table cells use break-word, not anywhere: "anywhere" lets an auto-width column shrink to one letter, which stacked names vertically. */
+  td, th { overflow-wrap: break-word; word-break: normal; hyphens: manual; }
+  .rtable th { white-space: nowrap; }
+  table { max-width: 100%; }
+  pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; font-optical-sizing: auto; }
+  h1 { letter-spacing: -0.02em; line-height: 1.12; }
+  img { image-rendering: auto; }
+  p { text-wrap: pretty; }
+  a { text-underline-offset: 0.18em; text-decoration-thickness: 1px; transition: color 160ms var(--ease-premium), text-decoration-color 160ms var(--ease-premium), text-decoration-thickness 160ms var(--ease-premium); }
+  ::selection { background: color-mix(in srgb, var(--color-primary) 24%, transparent); }
+  :focus-visible { outline: 2px solid var(--color-ring); outline-offset: 3px; }
+  .tabular-nums, table { font-variant-numeric: tabular-nums; }
+  .prose-article { font-family: var(--font-serif); font-size: clamp(1.0625rem, 1rem + 0.25vw, 1.125rem); line-height: 1.65; max-width: min(68ch, 100%); min-width: 0; }
+  .fulltext { max-width: min(68ch, 100%); min-width: 0; overflow-wrap: anywhere; }
+  .fulltext > * + * { margin-top: 0.85rem; }
+  .fulltext p { margin-block: 0; } .fulltext h3, .fulltext h4 { text-wrap: pretty; }
+  .fulltext h3, .fulltext h4, .fulltext h5, .fulltext h6 { margin-top: 2rem; font-size: 1.2rem; font-weight: 700; }
+  .fulltext .ft-kw { margin-top: 1rem; }
+  .fulltext ul { list-style: disc; padding-left: 1.5rem; } .fulltext ol { list-style: decimal; padding-left: 1.5rem; }
+  .fulltext img { display: block; max-width: 100%; width: auto; height: auto; margin-inline: auto; }
+  .fulltext .ft-table { max-width: 100%; } .fulltext table { border-collapse: collapse; font-size: 0.95rem; width: 100%; table-layout: fixed; }
+  .fulltext td, .fulltext th { border: 1px solid var(--color-border); padding: 0.35rem 0.6rem; vertical-align: top; }
+  .fulltext .ft-center { text-align: center; } .fulltext a { color: var(--color-primary); text-decoration: underline; }
+  .link { color: var(--color-primary); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); }
+  .link:hover { text-decoration-color: currentColor; text-decoration-thickness: 2px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+}
+
+/* ---------- Motion and surfaces ---------- */
+
+/* Thin bar while a page is loading. */
+@keyframes nav-progress { 0% { transform: scaleX(0.05); } 60% { transform: scaleX(0.7); } 100% { transform: scaleX(0.92); } }
+.nav-progress { animation: nav-progress 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+
+/* Page changes. Browsers that support view transitions cross-fade the whole page natively (the router switches this on),
+   with the header held still. Others get a short fade on the new page instead. */
+@keyframes page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.page-enter { animation: page-enter 320ms var(--ease-premium) backwards; }
+@supports (view-transition-name: none) {
+  .page-enter { animation: none; }
+  .site-header { view-transition-name: site-header; }
+  ::view-transition-old(root), ::view-transition-new(root) { mix-blend-mode: normal; animation-timing-function: var(--ease-premium); }
+  ::view-transition-old(root) { animation: vt-out 140ms ease both; }
+  ::view-transition-new(root) { animation: vt-in 380ms var(--ease-premium) both; }
+  ::view-transition-group(site-header) { animation-duration: 0s; }
+}
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* The header lifts off the page once you scroll. The logo eases down a little; a transform, so nothing below it moves. */
+.site-header { transition: box-shadow 280ms var(--ease-premium), background-color 280ms var(--ease-premium), border-color 280ms var(--ease-premium); }
+.site-header[data-scrolled="true"] {
+  background-color: color-mix(in srgb, var(--color-background) 90%, transparent);
+  box-shadow: 0 1px 0 rgb(16 32 64 / 0.03), 0 12px 28px -16px rgb(16 32 64 / 0.28);
+}
+.site-logo img { transform-origin: left center; transition: transform 360ms var(--ease-settle), opacity 200ms var(--ease-premium); }
+.site-header[data-scrolled="true"] .site-logo img { transform: scale(0.88); }
+@media (hover: hover) { .site-logo:hover img { opacity: 0.86; } }
+
+/* The one orchestrated moment: the home page opening resolves in order. */
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.hero-seq > * { animation: rise 820ms var(--ease-settle) backwards; }
+.hero-seq > :nth-child(1) { animation-delay: 60ms; }
+.hero-seq > :nth-child(2) { animation-delay: 140ms; }
+.hero-seq > :nth-child(3) { animation-delay: 230ms; }
+.hero-seq > :nth-child(4) { animation-delay: 330ms; }
+
+/* Loading placeholders: a slow sweep of light, in the brand blue. */
+@keyframes shimmer { from { background-position: 180% 0; } to { background-position: -180% 0; } }
+.skeleton-shimmer {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--color-primary) 6%, transparent) 30%, color-mix(in srgb, var(--color-primary) 13%, transparent) 50%, color-mix(in srgb, var(--color-primary) 6%, transparent) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.9s linear infinite;
+}
+
+/* The search field. Quiet at rest, it firms up when focused. */
+.search-field { transition: border-color 200ms var(--ease-premium), box-shadow 280ms var(--ease-premium); }
+.search-field:focus-within { border-color: var(--color-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 13%, transparent), var(--shadow-lift); }
+
+/* A result row. The title carries a quiet underline that deepens on hover, and a thin marker slides in at the edge. */
+.title-link { text-decoration-line: underline; text-decoration-color: color-mix(in srgb, currentColor 26%, transparent); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.result-row::before {
+  content: ""; position: absolute; left: -1rem; top: 1.4rem; bottom: 1.4rem; width: 2px; border-radius: 2px;
+  background: var(--color-primary); transform: scaleY(0); transform-origin: top; transition: transform 320ms var(--ease-settle);
+}
+@media (hover: hover) {
+  .result-row:hover::before, .result-row:focus-within::before { transform: scaleY(1); }
+  .result-row:hover .title-link, .result-row:focus-within .title-link { text-decoration-color: currentColor; text-decoration-thickness: 2px; }
+}
+
+/* Reading progress on article pages. Driven by scroll position in the browser, no script; browsers without support simply do not show it. */
+@keyframes read-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.read-progress { position: fixed; inset: 0 0 auto 0; z-index: 45; height: 2px; background: var(--color-primary); transform: scaleX(0); transform-origin: 0 50%; pointer-events: none; }
+@supports (animation-timeline: scroll()) { .read-progress { animation: read-grow linear both; animation-timeline: scroll(root block); } }
+
+/* Native selects match the inputs: custom chevron, same focus ring. Unlayered so it wins over per-element padding utilities. */
+select:not([multiple]):not([size]) {
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0.7rem center; background-size: 1rem;
+  padding-right: 2.25rem;
+  transition: border-color 180ms var(--ease-premium), box-shadow 220ms var(--ease-premium);
+}
+select:hover { border-color: color-mix(in srgb, var(--color-foreground) 45%, transparent); }
+select:focus-visible { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 14%, transparent); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--color-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+  .nav-progress { animation: none; transform: scaleX(0.6); }
+  .page-enter, .hero-seq > *, .skeleton-shimmer { animation: none; }
+  .read-progress { display: none; }
+  .site-logo img, .result-row::before { transition: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+/* Upload progress (premium bar) */
+@keyframes upl-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes upl-indeterminate { from { left: -40%; } to { left: 100%; } }
+.upl-sheen { animation: upl-sheen 1.4s var(--ease-settle, ease-in-out) infinite; }
+.upl-indeterminate { animation: upl-indeterminate 1.3s var(--ease-premium, ease-in-out) infinite; }
+@media (prefers-reduced-motion: reduce) { .upl-sheen, .upl-indeterminate { animation: none; } }
+
+/* ---------- Premium polish ---------- */
+
+/* Every clickable thing feels clickable, and taps never wait for a double-tap check. */
+button:not(:disabled), [role="button"], summary, label[for], select { touch-action: manipulation; }
+button:not(:disabled) { cursor: pointer; }
+
+/* Text fields and cards share one focus and lift language. */
+.surface { border: 1px solid var(--color-border); background: var(--color-background); border-radius: var(--radius-xl); box-shadow: var(--shadow-soft); transition: box-shadow 260ms var(--ease-premium), border-color 200ms var(--ease-premium), transform 260ms var(--ease-premium); }
+@media (hover: hover) { .surface-interactive:hover { box-shadow: var(--shadow-lift); border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); transform: translateY(-1px); } }
+
+/* Lists and grids settle in one after another instead of appearing at once. */
+@keyframes stagger-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.stagger > * { animation: stagger-in 480ms var(--ease-settle) backwards; }
+.stagger > :nth-child(1) { animation-delay: 30ms; } .stagger > :nth-child(2) { animation-delay: 70ms; } .stagger > :nth-child(3) { animation-delay: 110ms; }
+.stagger > :nth-child(4) { animation-delay: 150ms; } .stagger > :nth-child(5) { animation-delay: 190ms; } .stagger > :nth-child(n+6) { animation-delay: 230ms; }
+
+/* Rows that react to the pointer. */
+.row-hover { transition: background-color 160ms var(--ease-premium); }
+@media (hover: hover) { .row-hover:hover { background-color: color-mix(in srgb, var(--color-primary) 4%, transparent); } }
+
+/* Sidebar and tab items: a pill that eases between states. */
+.nav-item { transition: background-color 180ms var(--ease-premium), color 180ms var(--ease-premium), box-shadow 200ms var(--ease-premium), transform 120ms var(--ease-premium); }
+.nav-item:active { transform: scale(0.985); }
+.nav-item[aria-current="page"] { box-shadow: inset 2px 0 0 var(--color-primary); }
+
+/* Dialog backdrops and menus: crisp, with a light blur. */
+[data-radix-popper-content-wrapper] > *, [role="dialog"] { backface-visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) { .stagger > *, .surface, .nav-item, .row-hover { animation: none; transition: none; transform: none; } }
+
+
+/* ---------- Admin: fast, responsive ---------- */
+/* Tabs and area buttons react at once: a short colour change only, no waiting on a long ease. */
+.nav-item { transition: background-color 90ms ease-out, color 90ms ease-out, border-color 90ms ease-out, transform 70ms ease-out; }
+.nav-item[aria-current="page"] { box-shadow: none; }
+/* Lists settle in quickly (the old stagger took half a second to finish). */
+.stagger > * { animation-duration: 180ms; }
+.stagger > :nth-child(n) { animation-delay: 0ms; }
+/* Admin tables: real columns on wide screens, labelled rows (no sideways scroll, no one-letter-wide columns) on narrow ones. */
+.rtable { table-layout: auto; }
+.rtable td, .rtable th { vertical-align: top; padding-right: 0.75rem; }
+@media (max-width: 639px) {
+  .rtable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .rtable, .rtable tbody, .rtable tr, .rtable td, .rtable caption { display: block; width: 100%; }
+  .rtable tr { padding: 0.6rem 0; border-bottom: 1px solid var(--color-border); }
+  .rtable td { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.25rem 0; text-align: right; }
+  .rtable td::before { content: attr(data-label); flex: none; color: var(--color-muted-foreground); text-align: left; }
+  .rtable td[data-label=""]::before { display: none; }
+  .rtable td[data-label=""] { justify-content: flex-end; flex-wrap: wrap; }
+  .rtable td > input, .rtable td > div { max-width: 60%; }
+}
