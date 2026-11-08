@@ -1,0 +1,184 @@
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { adminDraftEmail, adminEmailHistory, adminEmailRecipients, adminSendEmail } from "@/lib/admin-mail.functions";
+import { ACTION_MAX, BODY_MAX, LENGTH_SPEC, NAME_MAX, RECIPIENTS_MAX, SUBJECT_MAX, cleanName, fallbackDraft, parseRecipients, type Length, type Tone } from "@/lib/domain/admin-email";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { fmtDate } from "@/lib/ui";
+import { meQuery } from "@/lib/queries";
+
+const input = "flex h-11 w-full rounded-lg border border-input bg-background px-3 text-base";
+type To = { kind: "user"; id: string; email: string; name: string | null } | { kind: "address"; emails: string[]; name: string };
+
+/** Administrators only. Write to a registered user or to any e-mail address (people without an account too). Describe what the message must say,
+ *  pick a length, let the AI write a draft (or use your own notes as the draft), edit it, then send. The AI never sends. */
+export function AdminEmail() {
+  const me = useQuery({ ...meQuery(), staleTime: 10_000 });
+  const isAdmin = (me.data?.roles ?? []).some((x) => x === "admin" || x === "super_admin");
+  return isAdmin ? <AdminEmailPanel /> : null;
+}
+
+function AdminEmailPanel() {
+  const qc = useQueryClient();
+  const [mode, setMode] = useState<"user" | "address">("user");
+  const [q, setQ] = useState(""); const [applied, setApplied] = useState(""); const [page, setPage] = useState(1); const [recent, setRecent] = useState(true);
+  const [addrText, setAddrText] = useState(""); const [addrName, setAddrName] = useState("");
+  const [to, setTo] = useState<To | null>(null);
+  const [tone, setTone] = useState<Tone>("friendly");
+  const [length, setLength] = useState<Length>("medium");
+  const [instr, setInstr] = useState(""); const [action, setAction] = useState("");
+  const [subject, setSubject] = useState(""); const [body, setBody] = useState("");
+  const [draftId, setDraftId] = useState(() => crypto.randomUUID());
+  const [drafting, setDrafting] = useState(false); const [secs, setSecs] = useState(0); const [sending, setSending] = useState(false);
+  const [source, setSource] = useState<null | "ai" | "template">(null);
+  const users = useQuery({ queryKey: ["mail-users", applied, page, recent], queryFn: () => adminEmailRecipients({ data: { ...(applied ? { q: applied } : {}), page, recent } }), enabled: !to && mode === "user", retry: false, staleTime: 0 });
+  const pages = users.data ? Math.max(1, Math.ceil(users.data.total / users.data.pageSize)) : 1;
+  const history = useQuery({ queryKey: ["admin-email-history"], queryFn: () => adminEmailHistory({ data: {} }), retry: false });
+  const parsed = parseRecipients(addrText);
+
+  // A running count, so a slow answer looks like work in progress and not like a frozen page.
+  useEffect(() => {
+    if (!drafting) { setSecs(0); return; }
+    const t = setInterval(() => setSecs((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [drafting]);
+
+  const firstName = !to ? "" : (to.kind === "user" ? (to.name ?? "") : to.name).trim().split(/\s+/)[0] ?? "";
+  const reset = () => { setSubject(""); setBody(""); setInstr(""); setAction(""); setSource(null); };
+  const target = () => (to?.kind === "user" ? { userId: to.id } : { name: to?.kind === "address" ? to.name : "" });
+
+  async function draft() {
+    if (!to) return;
+    setDrafting(true);
+    try {
+      const d = await adminDraftEmail({ data: { ...target(), instructions: instr, ...(action.trim() ? { action: action.trim() } : {}), tone, length } });
+      setSubject(d.subject); setBody(d.body); setSource(d.source);
+      if (d.source === "ai") toast.success("Draft written. Read it and edit it before you send.");
+      else toast.message("The AI could not answer in time, so this is a plain draft from your notes. Edit it before sending.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not write a draft"); } finally { setDrafting(false); }
+  }
+  function useNotes() {
+    const d = fallbackDraft({ firstName, instructions: instr, length, action });
+    setSubject(d.subject); setBody(d.body); setSource("template");
+  }
+  async function send() {
+    if (!to) return;
+    const n = to.kind === "address" ? to.emails.length : 1;
+    const who = to.kind === "user" ? to.email : n === 1 ? to.emails[0]! : `${n} addresses (each gets its own message)`;
+    if (!window.confirm(`Send this e-mail to ${who}?`)) return;
+    setSending(true);
+    try {
+      const r = await adminSendEmail({ data: { ...(to.kind === "user" ? { userId: to.id } : { emails: to.emails }), subject, body, draftId } });
+      if (r.failed > 0) toast.error(`${r.sent + r.queued} of ${r.results.length} sent. Failed: ${r.results.filter((x) => x.status === "FAILED").map((x) => x.to).join(", ")}`);
+      else toast.success(r.status === "SENT" ? (n > 1 ? `${n} e-mails sent` : "E-mail sent") : "E-mail queued. It will be retried automatically.");
+      reset(); setDraftId(crypto.randomUUID());
+      await qc.invalidateQueries({ queryKey: ["admin-email-history"] });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not send the e-mail"); } finally { setSending(false); }
+  }
+  function chooseAddresses() {
+    if (parsed.valid.length === 0) return;
+    setTo({ kind: "address", emails: parsed.valid, name: parsed.valid.length === 1 ? cleanName(addrName) : "" });
+  }
+
+  const toLabel = !to ? "" : to.kind === "user" ? to.email : to.emails.join(", ");
+  return (
+    <section aria-labelledby="mail-h" className="space-y-4">
+      <h2 id="mail-h" className="border-b border-border pb-2 text-[1.5rem]">E-mail someone</h2>
+      <p className="max-w-[70ch] text-[15px] text-muted-foreground">Write from the Paperly address to a registered user or to any e-mail address, including people who have no account. The AI can draft the message from your notes; you always read, edit and send it yourself. The AI sees only the first name and your notes.</p>
+
+      {!to ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Who to write to">
+            <Button size="sm" variant={mode === "user" ? "default" : "outline"} onClick={() => setMode("user")}>Registered user</Button>
+            <Button size="sm" variant={mode === "address" ? "default" : "outline"} onClick={() => setMode("address")}>Any e-mail address</Button>
+          </div>
+          {mode === "user" ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Who to show">
+                <Button size="sm" variant={recent ? "default" : "outline"} onClick={() => { setRecent(true); setPage(1); }}>Signed in last 7 days</Button>
+                <Button size="sm" variant={!recent ? "default" : "outline"} onClick={() => { setRecent(false); setPage(1); }}>All users</Button>
+              </div>
+              <form className="flex max-w-lg gap-2" onSubmit={(e) => { e.preventDefault(); setApplied(q.trim()); setPage(1); }}>
+                <input className={input} placeholder="Filter by name or e-mail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter users" />
+                <Button type="submit" variant="outline">Filter</Button>
+              </form>
+              {users.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+              {users.isError && <p role="alert" className="text-sm text-destructive">Could not load users.</p>}
+              {users.data && users.data.rows.length === 0 && <p className="text-sm text-muted-foreground">{recent ? "No one has signed in during the last 7 days." : "No one matches."}</p>}
+              <ul className="divide-y divide-border">
+                {(users.data?.rows ?? []).map((u) => (
+                  <li key={u.id}><button className="row-hover flex w-full flex-wrap items-center justify-between gap-2 py-3 text-left" onClick={() => setTo({ kind: "user", id: u.id, email: u.email, name: u.name })}><span className="min-w-0"><span className="font-medium">{u.name ?? "(no name)"}</span><span className="block break-words text-sm text-muted-foreground">{u.email}</span></span><span className="text-xs text-muted-foreground">{u.lastSignIn ? `signed in ${fmtDate(u.lastSignIn)}` : "never signed in"}</span></button></li>
+                ))}
+              </ul>
+              {pages > 1 && <div className="flex items-center gap-3 text-sm"><Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button><span>Page {page} of {pages}</span><Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button></div>}
+            </>
+          ) : (
+            <form className="max-w-xl space-y-3" onSubmit={(e) => { e.preventDefault(); chooseAddresses(); }}>
+              <label className="block text-sm font-medium">E-mail address <span className="font-normal text-muted-foreground">(up to {RECIPIENTS_MAX}; separate several with commas or new lines. Each person gets their own message.)</span>
+                <Textarea rows={2} value={addrText} onChange={(e) => setAddrText(e.target.value)} placeholder="name@example.com" autoComplete="off" spellCheck={false} />
+              </label>
+              {addrText.trim() && (
+                <p className="text-sm" role="status">
+                  {parsed.valid.length > 0 && <span className="text-positive">{parsed.valid.length} valid address{parsed.valid.length === 1 ? "" : "es"}. </span>}
+                  {parsed.invalid.length > 0 && <span className="text-destructive">Not valid: {parsed.invalid.slice(0, 3).join(", ")}{parsed.invalid.length > 3 ? "…" : ""}. </span>}
+                  {parsed.tooMany && <span className="text-destructive">Only the first {RECIPIENTS_MAX} will be used.</span>}
+                </p>
+              )}
+              {parsed.valid.length === 1 && (
+                <label className="block text-sm font-medium">Name for the greeting <span className="font-normal text-muted-foreground">(optional)</span>
+                  <input className={input} maxLength={NAME_MAX} value={addrName} onChange={(e) => setAddrName(e.target.value)} placeholder="For example: Asha Rao" autoComplete="off" />
+                </label>
+              )}
+              <Button type="submit" disabled={parsed.valid.length === 0 || parsed.invalid.length > 0}>Write to {parsed.valid.length > 1 ? `${parsed.valid.length} people` : "this address"}</Button>
+            </form>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4 rounded-lg border border-border bg-background p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="min-w-0 text-[15px]">To: <span className="font-semibold">{to.kind === "user" ? (to.name ?? "(no name)") : to.name || (to.emails.length > 1 ? `${to.emails.length} people` : "")}</span> <span className="break-words text-muted-foreground">{toLabel}</span>{to.kind === "address" && <span className="ml-2 rounded-full border border-border bg-wash px-2 py-0.5 text-xs">no account needed</span>}</p><Button size="sm" variant="outline" onClick={() => { setTo(null); reset(); }}>Change recipient</Button></div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-medium">What should the e-mail say? <span className="font-normal text-muted-foreground">(your notes, in any wording; include amounts, dates and links you want in it)</span>
+              <Textarea rows={4} maxLength={1500} value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="For example: The publication fee for her paper is waived and she can now upload it. The waiver stays until 30 November." />
+            </label>
+            <label className="block text-sm font-medium">What should they do next? <span className="font-normal text-muted-foreground">(optional)</span>
+              <input className={input} maxLength={ACTION_MAX} value={action} onChange={(e) => setAction(e.target.value)} placeholder="For example: Sign in and upload the manuscript." />
+            </label>
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">Length</legend>
+              <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="Length of the e-mail">
+                {(Object.keys(LENGTH_SPEC) as Length[]).map((k) => (
+                  <button key={k} type="button" aria-pressed={length === k} onClick={() => setLength(k)} className={`nav-item rounded-lg border px-3 py-2 text-left ${length === k ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-wash"}`}>
+                    <span className="block text-[15px] font-semibold">{LENGTH_SPEC[k].label} <span className="font-normal text-muted-foreground">· {LENGTH_SPEC[k].words}</span></span>
+                    <span className="block text-sm text-muted-foreground">{LENGTH_SPEC[k].hint}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-sm font-medium">Tone<select className={input + " w-40"} value={tone} onChange={(e) => setTone(e.target.value as Tone)}><option value="friendly">Friendly</option><option value="formal">Formal</option><option value="firm">Firm</option></select></label>
+              <Button disabled={drafting || instr.trim().length < 10} onClick={draft}>{drafting ? `Writing… ${secs}s` : subject || body ? "Write again with AI" : "Write with AI"}</Button>
+              <Button variant="outline" disabled={drafting || instr.trim().length < 10} onClick={useNotes} title="Instant: no AI, built only from your notes">Use my notes as the draft</Button>
+            </div>
+            {drafting && <p className="text-xs text-muted-foreground" role="status">Usually a few seconds. If the AI is slow it switches to another provider, and if none answers you get a plain draft from your notes.</p>}
+          </div>
+
+          <label className="block text-sm font-medium">Subject<input className={input} maxLength={SUBJECT_MAX} value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+          <label className="block text-sm font-medium">Message<Textarea rows={length === "long" ? 16 : length === "short" ? 7 : 11} maxLength={BODY_MAX} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+          {source === "ai" && <p className="text-xs text-caution">Written by AI from your notes. Check every fact, amount and date before sending.</p>}
+          {source === "template" && <p className="text-xs text-caution">A plain draft built from your notes, not written by AI. Reword anything that reads like a note to yourself.</p>}
+          <div className="flex flex-wrap items-center gap-3"><Button disabled={sending || subject.trim().length < 3 || body.trim().length < 10} onClick={send}>{sending ? "Sending…" : to.kind === "address" && to.emails.length > 1 ? `Send to ${to.emails.length} people` : "Send e-mail"}</Button><span className="text-xs text-muted-foreground">{body.length}/{BODY_MAX}</span></div>
+        </div>
+      )}
+
+      {(history.data?.length ?? 0) > 0 && (
+        <div><h3 className="text-[1.0625rem]">Recently sent</h3>
+          <ul className="divide-y divide-border border-y border-border text-sm">
+            {history.data!.map((h) => <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="font-medium">{h.subject}</span><span className="block break-words text-xs text-muted-foreground">{h.to}, {fmtDate(h.created_at)}</span></span><span className="text-xs uppercase tracking-wide text-muted-foreground">{h.status === "SENT" ? "sent" : h.status === "DEAD" ? "failed" : "queued"}</span></li>)}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}

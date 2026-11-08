@@ -1,0 +1,42 @@
+name: Android APK
+on:
+  workflow_dispatch:
+  push:
+    tags: ["android-v*"]
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      CAP_SERVER_URL: ${{ vars.CAP_SERVER_URL || 'https://paperly-ashy.vercel.app' }}
+      ANDROID_SHA256_CERT: ${{ vars.ANDROID_SHA256_CERT }}
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
+      KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: android-actions/setup-android@v3
+      - run: bun install --frozen-lockfile
+      - run: bun run android:config
+      - name: Restore signing key (release builds only)
+        if: env.KS_B64 != ''
+        run: |
+          echo "$KS_B64" | base64 -d > android/paperly-release.jks
+          echo "ANDROID_KEYSTORE_FILE=paperly-release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=paperly" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+      - name: Build (signed release if the key is set, otherwise debug)
+        run: |
+          bunx cap sync android
+          cd android
+          if [ -n "$ANDROID_KEYSTORE_FILE" ]; then ./gradlew assembleRelease; else ./gradlew assembleDebug; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paperly-apk
+          path: android/app/build/outputs/apk/**/*.apk
